@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  jellyfinbot:
+    build: .
+    image: jellyfinbot:latest
+    container_name: jellyfinbot
+    restart: unless-stopped
+    volumes:
+      - jellyfinbot_data:/data
+    environment:
+      # ── Discord ──────────────────────────────────────────────────────────────
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - GUILD_ID=${GUILD_ID}
+      - OWNER_ID=${OWNER_ID}
+      # ── Jellyfin ─────────────────────────────────────────────────────────────
+      - JELLYFIN_URL=${JELLYFIN_URL}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      # ── Jellyseerr ───────────────────────────────────────────────────────────
+      - JELLYSEERR_URL=${JELLYSEERR_URL}
+      - JELLYSEERR_API_KEY=${JELLYSEERR_API_KEY}
+      # ── Bot settings ─────────────────────────────────────────────────────────
+      - SUBSCRIBER_ROLE_ID=${SUBSCRIBER_ROLE_ID}
+      - AUDIT_LOG_CHANNEL_ID=${AUDIT_LOG_CHANNEL_ID}
+      - DATA_DIR=/data
+
+volumes:
+  jellyfinbot_data:
