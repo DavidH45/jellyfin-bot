@@ -855,6 +855,77 @@ async function handleHistory(interaction) {
   await interaction.editReply({ embeds: [embed] });
 }
 
+async function handleExportDb(interaction) {
+  await interaction.deferReply(EPHEMERAL);
+
+  const data = db.exportData();
+  const json = JSON.stringify(data, null, 2);
+  const buffer = Buffer.from(json, 'utf8');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filename = `jellyfin-bot-backup-${timestamp}.json`;
+
+  await auditLog(interaction.client, {
+    action: 'db_exported',
+    detail: `${data.users.length} user(s), ${data.audit_log.length} audit entries, ${data.subscription_history.length} history entries`,
+    actor: interaction.user.username,
+  });
+
+  await interaction.editReply({
+    content:
+      `✅ Database exported.\n` +
+      `• **${data.users.length}** user(s)\n` +
+      `• **${data.audit_log.length}** audit log entries\n` +
+      `• **${data.subscription_history.length}** history entries`,
+    files: [{ attachment: buffer, name: filename }],
+  });
+}
+
+async function handleImportDb(interaction) {
+  await interaction.deferReply(EPHEMERAL);
+
+  const attachment = interaction.options.getAttachment('backup');
+
+  if (!attachment.name?.endsWith('.json')) {
+    return interaction.editReply('❌ Please attach a valid `.json` backup file exported by this bot.');
+  }
+
+  // Fetch the file from Discord's CDN
+  const axios = require('axios');
+  let data;
+  try {
+    const response = await axios.get(attachment.url, { responseType: 'text', timeout: 15_000 });
+    data = JSON.parse(response.data);
+  } catch (err) {
+    return interaction.editReply(`❌ Failed to fetch or parse the backup file: \`${err.message}\``);
+  }
+
+  // Basic structure validation
+  if (!Array.isArray(data.users) || !Array.isArray(data.audit_log) || !Array.isArray(data.subscription_history)) {
+    return interaction.editReply('❌ Invalid backup format — missing one or more required tables (`users`, `audit_log`, `subscription_history`).');
+  }
+
+  try {
+    db.importData(data);
+  } catch (err) {
+    console.error('[importdb] Error during import:', err.message);
+    return interaction.editReply(`❌ Import failed: \`${err.message}\``);
+  }
+
+  await auditLog(interaction.client, {
+    action: 'db_imported',
+    detail: `Restored ${data.users.length} user(s), ${data.audit_log.length} audit entries, ${data.subscription_history.length} history entries | backup exported at ${data.exportedAt ?? 'unknown'}`,
+    actor: interaction.user.username,
+  });
+
+  await interaction.editReply(
+    `✅ Database import complete.\n` +
+    `• **${data.users.length}** user(s) restored\n` +
+    `• **${data.audit_log.length}** audit log entries restored\n` +
+    `• **${data.subscription_history.length}** history entries restored\n` +
+    (data.exportedAt ? `• Backup was taken at: \`${data.exportedAt}\`` : '')
+  );
+}
+
 // ─── Command definition ───────────────────────────────────────────────────────
 
 const userOption = (b) =>
@@ -947,6 +1018,16 @@ module.exports = {
         .addStringOption(opt =>
           opt.setName('reason')
             .setDescription('Reason to include in the DM sent to each user')
+            .setRequired(true)))
+    .addSubcommand(sub =>
+      sub.setName('exportdb')
+        .setDescription('Export the full database as a JSON backup file (sent as a file attachment)'))
+    .addSubcommand(sub =>
+      sub.setName('importdb')
+        .setDescription('⚠️ Overwrite the database from a JSON backup file (irreversible)')
+        .addAttachmentOption(opt =>
+          opt.setName('backup')
+            .setDescription('The .json file exported by /manage exportdb')
             .setRequired(true))),
 
   async execute(interaction) {
@@ -971,6 +1052,8 @@ module.exports = {
       case 'adddaysall':    return handleAddDaysAll(interaction);
       case 'synccheck':     return handleSyncCheck(interaction);
       case 'history':       return handleHistory(interaction);
+      case 'exportdb':      return handleExportDb(interaction);
+      case 'importdb':      return handleImportDb(interaction);
       default:
         return interaction.reply({ content: '❌ Unknown subcommand.', ...EPHEMERAL });
     }

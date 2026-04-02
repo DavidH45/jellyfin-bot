@@ -288,6 +288,56 @@ function getSubHistory(discordId, limit = 25) {
   `).all(discordId, limit);
 }
 
+// ─── Backup / restore ─────────────────────────────────────────────────────────
+
+/** Return every row from all three tables, suitable for re-importing later. */
+function exportData() {
+  return {
+    exportedAt: new Date().toISOString(),
+    version: 1,
+    users: db.prepare('SELECT * FROM users').all(),
+    audit_log: db.prepare('SELECT * FROM audit_log ORDER BY id ASC').all(),
+    subscription_history: db.prepare('SELECT * FROM subscription_history ORDER BY id ASC').all(),
+  };
+}
+
+/**
+ * Wipe all three tables and rebuild them from the provided backup payload.
+ * Runs inside a single transaction — either all rows land or none do.
+ * @param {{ users: object[], audit_log: object[], subscription_history: object[] }} payload
+ */
+function importData({ users, audit_log, subscription_history }) {
+  const doImport = db.transaction(() => {
+    db.prepare('DELETE FROM subscription_history').run();
+    db.prepare('DELETE FROM audit_log').run();
+    db.prepare('DELETE FROM users').run();
+
+    const insertUser = db.prepare(`
+      INSERT INTO users
+        (discord_id, discord_name, jellyfin_id, jellyseerr_id, username, expiry_date, is_active, warned, created_at)
+      VALUES
+        (@discord_id, @discord_name, @jellyfin_id, @jellyseerr_id, @username, @expiry_date, @is_active, @warned, @created_at)
+    `);
+    for (const u of users) insertUser.run(u);
+
+    const insertAudit = db.prepare(`
+      INSERT INTO audit_log (id, timestamp, action, discord_id, discord_name, detail, actor)
+      VALUES (@id, @timestamp, @action, @discord_id, @discord_name, @detail, @actor)
+    `);
+    for (const a of audit_log) insertAudit.run(a);
+
+    const insertHistory = db.prepare(`
+      INSERT INTO subscription_history
+        (id, timestamp, discord_id, discord_name, event, days, old_expiry, new_expiry, reason, actor)
+      VALUES
+        (@id, @timestamp, @discord_id, @discord_name, @event, @days, @old_expiry, @new_expiry, @reason, @actor)
+    `);
+    for (const h of subscription_history) insertHistory.run(h);
+  });
+
+  doImport();
+}
+
 module.exports = {
   getUser,
   getUserByJellyfinId,
@@ -308,4 +358,7 @@ module.exports = {
   // subscription history
   addSubHistory,
   getSubHistory,
+  // backup / restore
+  exportData,
+  importData,
 };
