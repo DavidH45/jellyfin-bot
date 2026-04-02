@@ -604,12 +604,13 @@ async function handleLink(interaction) {
     return interaction.editReply(`❌ That Jellyfin account is already linked to <@${alreadyLinked.discord_id}>.`);
   }
 
-  // Disable the account — no days added yet
+  // Disable the account — no days added yet (may fail for admin accounts)
+  let isAdminAccount = false;
   try {
     await jellyfin.setUserPolicy(jellyfinUser.Id, true);
   } catch (err) {
-    console.error('[link] Jellyfin setUserPolicy error:', err?.response?.data ?? err.message);
-    return interaction.editReply('❌ Found Jellyfin account but could not disable it. Check logs.');
+    console.warn('[link] Could not disable Jellyfin account — assuming admin account, continuing:', err?.response?.data ?? err.message);
+    isAdminAccount = true;
   }
 
   // Import into Jellyseerr (non-fatal)
@@ -637,7 +638,7 @@ async function handleLink(interaction) {
     `🔗 **Account linked** for <@${target.id}> (${target.tag || target.username})\n` +
     `> **Jellyfin Username:** \`${jellyfinUser.Name}\`\n` +
     `> **Jellyfin ID:** \`${jellyfinUser.Id}\`\n` +
-    `> **Status:** Disabled (no days added yet)\n` +
+    `> **Status:** ${isAdminAccount ? '⚠️ Admin account — not disabled' : 'Disabled (no days added yet)'}\n` +
     (jellyseerrId ? `> **Jellyseerr User ID:** \`${jellyseerrId}\`` : `> **Jellyseerr:** Import failed or unavailable`)
   );
 
@@ -645,7 +646,7 @@ async function handleLink(interaction) {
     action: 'account_linked',
     discordId: target.id,
     discordName: target.tag || target.username,
-    detail: `Jellyfin username: \`${jellyfinUser.Name}\` (ID: ${jellyfinUser.Id})${jellyseerrId ? ` | Jellyseerr ID: ${jellyseerrId}` : ''}`,
+    detail: `Jellyfin username: \`${jellyfinUser.Name}\` (ID: ${jellyfinUser.Id})${jellyseerrId ? ` | Jellyseerr ID: ${jellyseerrId}` : ''}${isAdminAccount ? ' | Admin account — not disabled' : ''}`,
     actor: interaction.user.username,
   });
 
@@ -659,7 +660,9 @@ async function handleLink(interaction) {
 
   await interaction.editReply(
     `✅ Linked existing Jellyfin account **\`${jellyfinUser.Name}\`** to **${target.username}**.\n` +
-    `• Account is **disabled** until you run \`/manage adddays\`.`
+    (isAdminAccount
+      ? `• ⚠️ Admin account detected — account was **not disabled**.`
+      : `• Account is **disabled** until you run \`/manage adddays\`.`)
   );
 }
 
